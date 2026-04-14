@@ -3,8 +3,8 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    anthropic_api_key: str = "mock_key_if_none"
-    model_name: str = "claude-3-5-haiku-20241022"
+    google_api_key: str = "your_gemini_key_here"
+    model_name: str = "gemini-2.0-flash"  # Latest fast model
     app_name: str = "R.A.Z.A. Agent"
     memory_db_path: str = "raza_memory.db"
     max_memory_messages: int = 50

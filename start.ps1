@@ -7,22 +7,19 @@ if (-not (Test-Path "backend\.env")) {
 }
 
 # Start the Backend
-Start-Process powershell -ArgumentList "-NoExit", "-Command", `
-    "Set-Location '$PWD\backend'; " + `
-    "pip install -r requirements.txt -q; " + `
-    "uvicorn app.main:app --reload --port 8000"
+$backendCmd = "cd backend; pip install -r requirements.txt -q; uvicorn app.main:app --reload --port 8000"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", $backendCmd
 
 Start-Sleep -Seconds 2
 
 # Start the Frontend
-Start-Process powershell -ArgumentList "-NoExit", "-Command", `
-    "Set-Location '$PWD\frontend'; " + `
-    "npm install; " + `
-    "npm run dev"
+$frontendCmd = "cd frontend; npm install; npm run dev"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", $frontendCmd
 
 Write-Host ""
 Write-Host "  Backend:  http://localhost:8000" -ForegroundColor Green
 Write-Host "  Frontend: http://localhost:5173" -ForegroundColor Green
 Write-Host "  API Docs: http://localhost:8000/docs" -ForegroundColor Green
 Write-Host ""
-Write-Host "Remember to add your ANTHROPIC_API_KEY to backend\.env" -ForegroundColor Yellow
+Write-Host "R.A.Z.A. is now initializing in separate windows." -ForegroundColor Yellow
+Write-Host "Using Google Gemini Free Tier." -ForegroundColor Cyan
