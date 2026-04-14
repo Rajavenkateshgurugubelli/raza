@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .api import chat, memory, notes
+from .api import chat, memory, notes, system
 from .memory.store import init_db
 from .core.config import get_settings
 
@@ -29,6 +29,7 @@ async def startup_event():
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
 app.include_router(notes.router, prefix="/api/notes", tags=["notes"])
+app.include_router(system.router, prefix="/api/system", tags=["system"])
 
 
 @app.get("/health")

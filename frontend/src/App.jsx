@@ -331,6 +331,7 @@ export default function App() {
   const [backendOnline, setBackendOnline] = useState(true);
   const [notesOpen, setNotesOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [providerInfo, setProviderInfo] = useState(null);
   const chatEndRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -339,7 +340,7 @@ export default function App() {
   }, []);
 
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
-  useEffect(() => { checkHealth(); fetchSessions(); }, []);
+  useEffect(() => { checkHealth(); fetchSessions(); fetchProviders(); }, []);
   useEffect(() => { loadSessionHistory(activeSession); }, [activeSession]);
 
   // Global keyboard shortcuts
@@ -368,6 +369,16 @@ export default function App() {
       setBackendOnline(res.ok);
     } catch {
       setBackendOnline(false);
+    }
+  }
+
+  async function fetchProviders() {
+    try {
+      const res = await fetch(`${API_BASE}/api/system/providers`);
+      const data = await res.json();
+      setProviderInfo(data);
+    } catch {
+      setProviderInfo(null);
     }
   }
 
@@ -527,6 +538,7 @@ export default function App() {
         return arr;
       });
       fetchSessions();
+      fetchProviders();
     }
   }, [input, loading, activeSession]);
 
@@ -575,6 +587,11 @@ export default function App() {
           <div className="header-title">
             <h1>R.A.Z.A.</h1>
             <p>Rapid Autonomous Zettelkasten Agent</p>
+            {providerInfo?.default_provider && (
+              <div className="provider-chip">
+                AI: {providerInfo.default_provider} · model: {providerInfo.model_name}
+              </div>
+            )}
           </div>
 
           <div className="header-actions">

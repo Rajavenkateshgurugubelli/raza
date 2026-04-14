@@ -35,6 +35,8 @@ Tool-use rules:
 - ALWAYS use run_python for calculations, data processing, code execution
 - ALWAYS use save_note when asked to remember something
 - ALWAYS use search_notes before answering questions about past notes or remembered info
+- Use gmail_list_recent for inbox summaries and gmail_create_draft for email drafting
+- Use calendar_upcoming and calendar_create_event for planning/scheduling requests
 - Chain tools when necessary (search → fetch → synthesize)
 
 Today's date: {date}
@@ -270,6 +272,15 @@ def _provider_order() -> list[str]:
     if settings.anthropic_api_key and "anthropic" not in available:
         available.append("anthropic")
     return available
+
+
+def current_provider_snapshot() -> dict:
+    order = _provider_order()
+    return {
+        "available": order,
+        "active": order[0] if order else None,
+        "model_name": settings.model_name,
+    }
 
 
 def _should_try_next_provider(error_text: str) -> bool:

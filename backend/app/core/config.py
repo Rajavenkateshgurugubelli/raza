@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     google_api_key: str = ""
     model_name: str = "gemini-2.0-flash"
     provider_order: str = "gemini,anthropic"
+    google_oauth_access_token: str = ""
     app_name: str = "R.A.Z.A. Agent"
     memory_db_path: str = "raza_memory.db"
     max_memory_messages: int = 50
