@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import PropTypes from 'prop-types';
 import './index.css';
 
 const API_BASE = 'http://127.0.0.1:8000';
@@ -62,6 +63,9 @@ function ToolCard({ content }) {
     </div>
   );
 }
+ToolCard.propTypes = {
+  content: PropTypes.string.isRequired,
+};
 
 // ── Copy Button ───────────────────────────────────────────────────────────────
 function CopyBtn({ text }) {
@@ -78,6 +82,9 @@ function CopyBtn({ text }) {
     </button>
   );
 }
+CopyBtn.propTypes = {
+  text: PropTypes.string.isRequired,
+};
 
 // ── Message Component ─────────────────────────────────────────────────────────
 function Message({ msg }) {
@@ -106,6 +113,14 @@ function Message({ msg }) {
     </div>
   );
 }
+Message.propTypes = {
+  msg: PropTypes.shape({
+    role: PropTypes.string.isRequired,
+    content: PropTypes.string.isRequired,
+    streaming: PropTypes.bool,
+    time: PropTypes.instanceOf(Date),
+  }).isRequired,
+};
 
 // ── Note Item ─────────────────────────────────────────────────────────────────
 function NoteItem({ note, onDelete }) {
@@ -134,6 +149,15 @@ function NoteItem({ note, onDelete }) {
     </div>
   );
 }
+NoteItem.propTypes = {
+  note: PropTypes.shape({
+    id: PropTypes.number.isRequired,
+    title: PropTypes.string.isRequired,
+    content: PropTypes.string.isRequired,
+    tags: PropTypes.arrayOf(PropTypes.string),
+  }).isRequired,
+  onDelete: PropTypes.func.isRequired,
+};
 
 // ── Notes Panel ───────────────────────────────────────────────────────────────
 function NotesPanel({ visible, onClose }) {
@@ -197,6 +221,10 @@ function NotesPanel({ visible, onClose }) {
     </div>
   );
 }
+NotesPanel.propTypes = {
+  visible: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+};
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 function Sidebar({ visible, sessions, activeSession, onSelectSession, onNewSession, onDeleteSession }) {
@@ -242,6 +270,19 @@ function Sidebar({ visible, sessions, activeSession, onSelectSession, onNewSessi
     </aside>
   );
 }
+Sidebar.propTypes = {
+  visible: PropTypes.bool.isRequired,
+  sessions: PropTypes.arrayOf(
+    PropTypes.shape({
+      session_id: PropTypes.string.isRequired,
+      count: PropTypes.number.isRequired,
+    }),
+  ).isRequired,
+  activeSession: PropTypes.string.isRequired,
+  onSelectSession: PropTypes.func.isRequired,
+  onNewSession: PropTypes.func.isRequired,
+  onDeleteSession: PropTypes.func.isRequired,
+};
 
 // ── Offline Banner ────────────────────────────────────────────────────────────
 function OfflineBanner() {
@@ -275,6 +316,9 @@ function ShortcutsModal({ onClose }) {
     </div>
   );
 }
+ShortcutsModal.propTypes = {
+  onClose: PropTypes.func.isRequired,
+};
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {

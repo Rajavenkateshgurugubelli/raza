@@ -38,6 +38,13 @@ class Note(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class SessionSummary(Base):
+    __tablename__ = "session_summaries"
+    session_id = Column(String(100), primary_key=True, index=True)
+    summary = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
 
@@ -188,3 +195,60 @@ def _note_to_dict(note: Note) -> dict:
         "created_at": note.created_at.isoformat() if note.created_at else None,
         "updated_at": note.updated_at.isoformat() if note.updated_at else None,
     }
+
+
+def get_session_summary(session_id: str) -> str:
+    db = SessionLocal()
+    try:
+        row = db.query(SessionSummary).filter(SessionSummary.session_id == session_id).first()
+        return row.summary if row else ""
+    finally:
+        db.close()
+
+
+def upsert_session_summary(session_id: str, summary: str):
+    db = SessionLocal()
+    try:
+        row = db.query(SessionSummary).filter(SessionSummary.session_id == session_id).first()
+        if row:
+            row.summary = summary
+        else:
+            row = SessionSummary(session_id=session_id, summary=summary)
+            db.add(row)
+        db.commit()
+    finally:
+        db.close()
+
+
+def rollup_session_memory(session_id: str, keep_last: int = 20, max_chars: int = 4000):
+    """
+    Build/update a compact session summary from older messages.
+    Keeps recent turns in raw form and summarizes older content.
+    """
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.id)
+            .all()
+        )
+        if len(rows) <= keep_last:
+            return
+
+        older = rows[:-keep_last]
+        snippets = []
+        for row in older[-30:]:
+            text_value = row.content
+            if len(text_value) > 240:
+                text_value = f"{text_value[:240]}..."
+            snippets.append(f"{row.role}: {text_value}")
+
+        current = get_session_summary(session_id)
+        merged = "\n".join([current, *snippets]).strip()
+        if len(merged) > max_chars:
+            merged = merged[-max_chars:]
+
+        upsert_session_summary(session_id, merged)
+    finally:
+        db.close()

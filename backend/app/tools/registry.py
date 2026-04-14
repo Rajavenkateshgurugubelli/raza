@@ -85,16 +85,41 @@ tools_list = [
     }
 ]
 
+
+def get_tool_schemas():
+    return [
+        {
+            "name": tool["name"],
+            "description": tool["description"],
+            "input_schema": tool["input_schema"],
+        }
+        for tool in tools_list
+    ]
+
+
 def execute_tool(tool_name: str, tool_args: dict):
-    if tool_name == "web_search":
-        return web_search(tool_args.get("query"))
-    elif tool_name == "fetch_url":
-        return fetch_url(tool_args.get("url"))
-    elif tool_name == "run_python":
-        return run_python(tool_args.get("code"))
-    elif tool_name == "save_note":
-        return save_note(tool_args.get("title"), tool_args.get("content"), tool_args.get("tags"))
-    elif tool_name == "search_notes":
-        return search_notes(tool_args.get("query"))
-    else:
-        return f"Tool {tool_name} not found."
+    try:
+        if tool_name == "web_search":
+            query = tool_args.get("query")
+            return web_search(query)
+        elif tool_name == "fetch_url":
+            url = tool_args.get("url")
+            return fetch_url(url)
+        elif tool_name == "run_python":
+            return run_python(tool_args.get("code"))
+        elif tool_name == "save_note":
+            return save_note(tool_args.get("title"), tool_args.get("content"), tool_args.get("tags"))
+        elif tool_name == "search_notes":
+            return search_notes(tool_args.get("query"))
+        else:
+            return f"Tool {tool_name} not found."
+    except Exception as exc:
+        # Basic fallback chain for web research actions.
+        if tool_name == "fetch_url":
+            url = tool_args.get("url", "")
+            return web_search(url)
+        if tool_name == "web_search":
+            query = tool_args.get("query", "")
+            if isinstance(query, str) and query.startswith(("http://", "https://")):
+                return fetch_url(query)
+        return f"Tool {tool_name} failed: {exc}"
