@@ -799,6 +799,19 @@ body {
 }
 .note-item:hover .note-delete-btn { opacity: 1; }
 .note-delete-btn:hover { color: var(--danger); background: rgba(248,113,113,0.1); }
+.note-edit-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: all 0.15s;
+  opacity: 0;
+}
+.note-item:hover .note-edit-btn { opacity: 1; }
+.note-edit-btn:hover { color: var(--accent); background: rgba(56,189,248,0.1); }
 .note-item-chevron { font-size: 8px; color: var(--text-dim); }
 
 .note-tags { padding: 0 10px 6px; display: flex; flex-wrap: wrap; gap: 4px; }
@@ -818,6 +831,182 @@ body {
   border-top: 1px solid var(--border);
   white-space: pre-wrap;
   word-break: break-word;
+}
+.note-item-date {
+  padding: 3px 10px 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ── Note Edit / Create Form ── */
+.note-edit-form,
+.note-create-form {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface-2);
+}
+.note-create-form {
+  border-top: none;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--surface-3);
+}
+.note-edit-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 9px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color var(--transition);
+}
+.note-edit-input:focus { border-color: var(--accent); }
+.note-edit-textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 9px;
+  outline: none;
+  font-family: inherit;
+  resize: vertical;
+  line-height: 1.6;
+  transition: border-color var(--transition);
+}
+.note-edit-textarea:focus { border-color: var(--accent); }
+.note-edit-actions { display: flex; gap: 6px; }
+.note-save-btn {
+  flex: 1;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border: none;
+  border-radius: var(--radius-xs);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity var(--transition);
+}
+.note-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.note-cancel-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.note-cancel-btn:hover { border-color: var(--danger); color: var(--danger); }
+.notes-panel-add-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--accent);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.notes-panel-add-btn:hover { border-color: var(--accent); background: rgba(56,189,248,0.08); }
+
+/* ── System Status Panel ── */
+.status-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100vh;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  transform: translateX(100%);
+  transition: transform var(--transition);
+  box-shadow: -8px 0 40px rgba(0,0,0,0.4);
+}
+.status-panel.open { transform: translateX(0); }
+.status-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.status-section {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.status-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.status-row:last-child { border-bottom: none; }
+.status-row span:last-child { color: var(--text); font-family: var(--font-mono); font-size: 11px; }
+.status-value-accent { color: var(--accent) !important; font-weight: 600; }
+.status-ok { color: var(--accent-3) !important; }
+.status-off { color: var(--text-muted) !important; }
+.tools-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.tool-pill {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: rgba(56,189,248,0.06);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 7px;
+  color: var(--accent);
+}
+
+/* ── Session Rename Input ── */
+.session-rename-input {
+  flex: 1;
+  background: var(--surface-4);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 1px 6px;
+  outline: none;
+  font-family: inherit;
+  min-width: 0;
 }
 
 /* ── Modal ── */
@@ -897,7 +1086,79 @@ body {
   .sidebar { width: 0; position: fixed; z-index: 100; height: 100vh; }
   .sidebar:not(.collapsed) { width: var(--sidebar-w); box-shadow: 8px 0 40px rgba(0,0,0,0.5); }
   .header-title p { display: none; }
-  .notes-panel { width: 100vw; }
+  .notes-panel, .status-panel { width: 100vw; }
   .empty-suggestions { gap: 6px; }
   .suggestion-chip { font-size: 11px; padding: 6px 10px; }
+}
+
+/* ── File Attachment ── */
+.attach-btn {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  padding: 0;
+}
+.attach-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(56,189,248,0.06); }
+.attach-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.attachment-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: rgba(56,189,248,0.06);
+  border-top: 1px solid rgba(56,189,248,0.2);
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  animation: slideDown 0.18s ease;
+}
+@keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+.attachment-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+.attachment-size {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--surface-3);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.attachment-clear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 3px;
+  transition: color var(--transition);
+}
+.attachment-clear:hover { color: var(--danger); }
+
+/* ── Brief Button Active State ── */
+.active-btn {
+  color: #f59e0b !important;
+  border-color: #f59e0b !important;
+  background: rgba(245,158,11,0.1) !important;
+  animation: pulseGold 1.5s ease-in-out infinite;
+}
+@keyframes pulseGold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
 }

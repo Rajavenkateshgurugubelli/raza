@@ -5,6 +5,8 @@ import './index.css';
 
 const API_BASE = 'http://127.0.0.1:8000';
 const DEFAULT_SESSION = 'default';
+const MAX_ATTACH_BYTES = 50 * 1024; // 50 KB
+const ALLOWED_EXTS = ['.txt', '.md', '.py', '.js', '.ts', '.json', '.csv', '.yaml', '.yml', '.html', '.css'];
 
 const SUGGESTIONS = [
   { icon: '🔍', text: 'Search the web for latest AI news' },
@@ -13,6 +15,8 @@ const SUGGESTIONS = [
   { icon: '🧠', text: 'What notes do you have saved?' },
   { icon: '📡', text: 'Fetch and summarize https://news.ycombinator.com' },
   { icon: '💡', text: 'What can you do?' },
+  { icon: '📅', text: 'What are my upcoming calendar events?' },
+  { icon: '📧', text: 'Show my recent Gmail messages' },
 ];
 
 function formatTime(date) {
@@ -23,8 +27,36 @@ function isToolEvent(text) {
   return text && text.startsWith('🛠️');
 }
 
+function isToolDoneEvent(text) {
+  return text && text.startsWith('✅tool:');
+}
+
 function decodeSSE(raw) {
   return raw.replace(/⏎/g, '\n');
+}
+
+/** Drain an SSE ReadableStream and call onChunk for each decoded data line. */
+async function drainSSE(response, onChunk) {
+  if (!response.body) throw new Error('No readable stream');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let done = false;
+  let buffer = '';
+  while (!done) {
+    const { value, done: readerDone } = await reader.read();
+    done = readerDone;
+    if (value) {
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() ?? '';
+      for (const part of parts) {
+        if (!part.startsWith('data: ')) continue;
+        const data = part.substring(6);
+        if (data === '[DONE]') { done = true; break; }
+        onChunk(decodeSSE(data));
+      }
+    }
+  }
 }
 
 // ── Typing Indicator ──────────────────────────────────────────────────────────
@@ -38,8 +70,7 @@ function TypingDots() {
 
 // ── Tool Event Card ───────────────────────────────────────────────────────────
 function ToolCard({ content }) {
-  // Extract tool name and args from "🛠️ **tool_name**(args)"
-  const match = content.match(/🛠️\s+\*\*(.+?)\*\*\((.*)?\)$/s);
+  const match = content.match(/🛠️\s+\*\*(.+?)\*\*\((.*)??\)$/s);
   const toolName = match?.[1] || 'tool';
   const args = match?.[2] || '';
 
@@ -49,6 +80,10 @@ function ToolCard({ content }) {
     run_python: '🐍',
     save_note: '📝',
     search_notes: '🔍',
+    gmail_list_recent: '📧',
+    gmail_create_draft: '✉️',
+    calendar_upcoming: '📅',
+    calendar_create_event: '📆',
   };
   const icon = toolIcons[toolName] || '⚙️';
 
@@ -63,9 +98,7 @@ function ToolCard({ content }) {
     </div>
   );
 }
-ToolCard.propTypes = {
-  content: PropTypes.string.isRequired,
-};
+ToolCard.propTypes = { content: PropTypes.string.isRequired };
 
 // ── Copy Button ───────────────────────────────────────────────────────────────
 function CopyBtn({ text }) {
@@ -82,9 +115,7 @@ function CopyBtn({ text }) {
     </button>
   );
 }
-CopyBtn.propTypes = {
-  text: PropTypes.string.isRequired,
-};
+CopyBtn.propTypes = { text: PropTypes.string.isRequired };
 
 // ── Message Component ─────────────────────────────────────────────────────────
 function Message({ msg }) {
@@ -123,16 +154,76 @@ Message.propTypes = {
 };
 
 // ── Note Item ─────────────────────────────────────────────────────────────────
-function NoteItem({ note, onDelete }) {
+function NoteItem({ note, onDelete, onEdit }) {
   const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(note.title);
+  const [editContent, setEditContent] = useState(note.content);
+  const [editTags, setEditTags] = useState((note.tags || []).join(', '));
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    setSaving(true);
+    const tagsArr = editTags.split(',').map(t => t.trim()).filter(Boolean);
+    await onEdit(note.id, { title: editTitle, content: editContent, tags: tagsArr });
+    setSaving(false);
+    setEditing(false);
+  }
+
+  function handleCancelEdit() {
+    setEditTitle(note.title);
+    setEditContent(note.content);
+    setEditTags((note.tags || []).join(', '));
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="note-item editing">
+        <div className="note-edit-form">
+          <input
+            className="note-edit-input"
+            value={editTitle}
+            onChange={e => setEditTitle(e.target.value)}
+            placeholder="Title"
+          />
+          <textarea
+            className="note-edit-textarea"
+            value={editContent}
+            onChange={e => setEditContent(e.target.value)}
+            placeholder="Content"
+            rows={4}
+          />
+          <input
+            className="note-edit-input"
+            value={editTags}
+            onChange={e => setEditTags(e.target.value)}
+            placeholder="Tags (comma-separated)"
+          />
+          <div className="note-edit-actions">
+            <button className="note-save-btn" onClick={handleSave} disabled={saving}>
+              {saving ? '…' : 'Save'}
+            </button>
+            <button className="note-cancel-btn" onClick={handleCancelEdit}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="note-item">
       <div className="note-item-header" onClick={() => setExpanded(v => !v)}>
         <span className="note-item-title">{note.title}</span>
         <div className="note-item-actions">
           <button
+            className="note-edit-btn"
+            onClick={e => { e.stopPropagation(); setEditing(true); setExpanded(true); }}
+            title="Edit note"
+          >✎</button>
+          <button
             className="note-delete-btn"
-            onClick={(e) => { e.stopPropagation(); onDelete(note.id); }}
+            onClick={e => { e.stopPropagation(); onDelete(note.id); }}
             title="Delete note"
           >✕</button>
           <span className="note-item-chevron">{expanded ? '▲' : '▼'}</span>
@@ -146,6 +237,9 @@ function NoteItem({ note, onDelete }) {
       {expanded && (
         <div className="note-item-content">{note.content}</div>
       )}
+      {note.created_at && (
+        <div className="note-item-date">{new Date(note.created_at).toLocaleDateString()}</div>
+      )}
     </div>
   );
 }
@@ -155,8 +249,10 @@ NoteItem.propTypes = {
     title: PropTypes.string.isRequired,
     content: PropTypes.string.isRequired,
     tags: PropTypes.arrayOf(PropTypes.string),
+    created_at: PropTypes.string,
   }).isRequired,
   onDelete: PropTypes.func.isRequired,
+  onEdit: PropTypes.func.isRequired,
 };
 
 // ── Notes Panel ───────────────────────────────────────────────────────────────
@@ -164,6 +260,11 @@ function NotesPanel({ visible, onClose }) {
   const [notes, setNotes] = useState([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newContent, setNewContent] = useState('');
+  const [newTags, setNewTags] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const fetchNotes = useCallback(async (q = '') => {
     setLoading(true);
@@ -195,12 +296,79 @@ function NotesPanel({ visible, onClose }) {
     } catch { /* ignore */ }
   }
 
+  async function handleEdit(id, fields) {
+    try {
+      await fetch(`${API_BASE}/api/notes/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields),
+      });
+      fetchNotes(query);
+    } catch { /* ignore */ }
+  }
+
+  async function handleCreate() {
+    if (!newTitle.trim() || !newContent.trim()) return;
+    setSaving(true);
+    try {
+      const tagsArr = newTags.split(',').map(t => t.trim()).filter(Boolean);
+      await fetch(`${API_BASE}/api/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle.trim(), content: newContent.trim(), tags: tagsArr }),
+      });
+      setNewTitle(''); setNewContent(''); setNewTags('');
+      setCreating(false);
+      fetchNotes(query);
+    } catch { /* ignore */ }
+    finally { setSaving(false); }
+  }
+
   return (
     <div className={`notes-panel ${visible ? 'open' : ''}`}>
       <div className="notes-panel-header">
         <span>📒 Zettelkasten</span>
-        <button className="notes-panel-close" onClick={onClose}>✕</button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            className="notes-panel-add-btn"
+            onClick={() => setCreating(v => !v)}
+            title="New note"
+          >＋</button>
+          <button className="notes-panel-close" onClick={onClose}>✕</button>
+        </div>
       </div>
+
+      {creating && (
+        <div className="note-create-form">
+          <input
+            className="note-edit-input"
+            value={newTitle}
+            onChange={e => setNewTitle(e.target.value)}
+            placeholder="Note title…"
+            autoFocus
+          />
+          <textarea
+            className="note-edit-textarea"
+            value={newContent}
+            onChange={e => setNewContent(e.target.value)}
+            placeholder="Note content…"
+            rows={4}
+          />
+          <input
+            className="note-edit-input"
+            value={newTags}
+            onChange={e => setNewTags(e.target.value)}
+            placeholder="Tags (comma-separated)"
+          />
+          <div className="note-edit-actions">
+            <button className="note-save-btn" onClick={handleCreate} disabled={saving || !newTitle.trim() || !newContent.trim()}>
+              {saving ? '…' : 'Create'}
+            </button>
+            <button className="note-cancel-btn" onClick={() => setCreating(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       <div className="notes-panel-search">
         <input
           placeholder="🔍 Search notes…"
@@ -212,10 +380,10 @@ function NotesPanel({ visible, onClose }) {
       <div className="notes-panel-body">
         {loading && <div className="notes-loading">Searching…</div>}
         {!loading && notes.length === 0 && (
-          <div className="notes-empty">No notes yet. Ask R.A.Z.A. to save something.</div>
+          <div className="notes-empty">No notes yet. Ask R.A.Z.A. to save something, or click ＋ above.</div>
         )}
         {!loading && notes.map(n => (
-          <NoteItem key={n.id} note={n} onDelete={handleDelete} />
+          <NoteItem key={n.id} note={n} onDelete={handleDelete} onEdit={handleEdit} />
         ))}
       </div>
     </div>
@@ -226,8 +394,91 @@ NotesPanel.propTypes = {
   onClose: PropTypes.func.isRequired,
 };
 
+// ── System Status Panel ───────────────────────────────────────────────────────
+function StatusPanel({ visible, onClose }) {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    setLoading(true);
+    fetch(`${API_BASE}/api/system/status`)
+      .then(r => r.json())
+      .then(setStatus)
+      .catch(() => setStatus(null))
+      .finally(() => setLoading(false));
+  }, [visible]);
+
+  return (
+    <div className={`status-panel ${visible ? 'open' : ''}`}>
+      <div className="notes-panel-header">
+        <span>⚡ System Status</span>
+        <button className="notes-panel-close" onClick={onClose}>✕</button>
+      </div>
+      <div className="status-panel-body">
+        {loading && <div className="notes-loading">Loading…</div>}
+        {!loading && !status && <div className="notes-empty">Backend offline</div>}
+        {!loading && status && (
+          <>
+            <div className="status-section">
+              <div className="status-section-label">Agent</div>
+              <div className="status-row"><span>Name</span><span>{status.agent}</span></div>
+              <div className="status-row"><span>Version</span><span>{status.version}</span></div>
+            </div>
+            <div className="status-section">
+              <div className="status-section-label">AI Provider</div>
+              <div className="status-row"><span>Active</span><span className="status-value-accent">{status.provider?.active || 'none'}</span></div>
+              <div className="status-row"><span>Model</span><span>{status.provider?.model_name}</span></div>
+              <div className="status-row"><span>Available</span><span>{(status.provider?.available || []).join(', ') || 'none'}</span></div>
+            </div>
+            <div className="status-section">
+              <div className="status-section-label">Memory</div>
+              <div className="status-row"><span>Notes</span><span>{status.memory?.notes}</span></div>
+              <div className="status-row"><span>Sessions</span><span>{status.memory?.sessions}</span></div>
+              <div className="status-row"><span>Messages</span><span>{status.memory?.messages}</span></div>
+            </div>
+            <div className="status-section">
+              <div className="status-section-label">Tools ({status.tools?.length})</div>
+              <div className="tools-grid">
+                {(status.tools || []).map(t => (
+                  <span key={t} className="tool-pill">{t}</span>
+                ))}
+              </div>
+            </div>
+            <div className="status-section">
+              <div className="status-section-label">Config</div>
+              <div className="status-row"><span>Context msgs</span><span>{status.config?.recent_context_messages}</span></div>
+              <div className="status-row"><span>Max memory</span><span>{status.config?.max_memory_messages}</span></div>
+              <div className="status-row"><span>Google WS</span><span className={status.config?.google_workspace ? 'status-ok' : 'status-off'}>{status.config?.google_workspace ? 'Connected' : 'Not configured'}</span></div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+StatusPanel.propTypes = {
+  visible: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+};
+
 // ── Sidebar ───────────────────────────────────────────────────────────────────
-function Sidebar({ visible, sessions, activeSession, onSelectSession, onNewSession, onDeleteSession }) {
+function Sidebar({ visible, sessions, activeSession, onSelectSession, onNewSession, onDeleteSession, onRenameSession }) {
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameVal, setRenameVal] = useState('');
+
+  function startRename(sessionId) {
+    setRenamingId(sessionId);
+    setRenameVal(sessionId);
+  }
+
+  function commitRename(sessionId) {
+    if (renameVal.trim() && renameVal !== sessionId) {
+      onRenameSession(sessionId, renameVal.trim());
+    }
+    setRenamingId(null);
+  }
+
   return (
     <aside className={`sidebar ${visible ? '' : 'collapsed'}`}>
       <div className="sidebar-logo">
@@ -257,11 +508,30 @@ function Sidebar({ visible, sessions, activeSession, onSelectSession, onNewSessi
             onClick={() => onSelectSession(s.session_id)}
           >
             <span className="session-item-icon">💬</span>
-            <span className="session-item-name">{s.session_id}</span>
+            {renamingId === s.session_id ? (
+              <input
+                className="session-rename-input"
+                value={renameVal}
+                onChange={e => setRenameVal(e.target.value)}
+                onBlur={() => commitRename(s.session_id)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') commitRename(s.session_id);
+                  if (e.key === 'Escape') setRenamingId(null);
+                }}
+                autoFocus
+                onClick={e => e.stopPropagation()}
+              />
+            ) : (
+              <span
+                className="session-item-name"
+                onDoubleClick={e => { e.stopPropagation(); startRename(s.session_id); }}
+                title="Double-click to rename"
+              >{s.session_id}</span>
+            )}
             <span className="session-item-count">{s.count}</span>
             <button
               className="session-delete-btn"
-              onClick={(e) => { e.stopPropagation(); onDeleteSession(s.session_id); }}
+              onClick={e => { e.stopPropagation(); onDeleteSession(s.session_id); }}
               title="Delete session"
             >✕</button>
           </div>
@@ -272,16 +542,15 @@ function Sidebar({ visible, sessions, activeSession, onSelectSession, onNewSessi
 }
 Sidebar.propTypes = {
   visible: PropTypes.bool.isRequired,
-  sessions: PropTypes.arrayOf(
-    PropTypes.shape({
-      session_id: PropTypes.string.isRequired,
-      count: PropTypes.number.isRequired,
-    }),
-  ).isRequired,
+  sessions: PropTypes.arrayOf(PropTypes.shape({
+    session_id: PropTypes.string.isRequired,
+    count: PropTypes.number.isRequired,
+  })).isRequired,
   activeSession: PropTypes.string.isRequired,
   onSelectSession: PropTypes.func.isRequired,
   onNewSession: PropTypes.func.isRequired,
   onDeleteSession: PropTypes.func.isRequired,
+  onRenameSession: PropTypes.func.isRequired,
 };
 
 // ── Offline Banner ────────────────────────────────────────────────────────────
@@ -309,29 +578,35 @@ function ShortcutsModal({ onClose }) {
           <div className="shortcut-row"><kbd>Ctrl+/</kbd><span>Toggle sidebar</span></div>
           <div className="shortcut-row"><kbd>Ctrl+N</kbd><span>New session</span></div>
           <div className="shortcut-row"><kbd>Ctrl+E</kbd><span>Export chat</span></div>
+          <div className="shortcut-row"><kbd>Ctrl+B</kbd><span>Morning brief ☀️</span></div>
           <div className="shortcut-row"><kbd>Ctrl+Shift+N</kbd><span>Open notes</span></div>
+          <div className="shortcut-row"><kbd>Ctrl+Shift+S</kbd><span>System status</span></div>
           <div className="shortcut-row"><kbd>?</kbd><span>This panel</span></div>
+          <div className="shortcut-row"><kbd>Esc</kbd><span>Close panels</span></div>
         </div>
       </div>
     </div>
   );
 }
-ShortcutsModal.propTypes = {
-  onClose: PropTypes.func.isRequired,
-};
+ShortcutsModal.propTypes = { onClose: PropTypes.func.isRequired };
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [briefing, setBriefing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sessions, setSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(DEFAULT_SESSION);
   const [backendOnline, setBackendOnline] = useState(true);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [providerInfo, setProviderInfo] = useState(null);
+  // Attachment state
+  const [attachment, setAttachment] = useState(null); // { name, content }
+  const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -346,17 +621,19 @@ export default function App() {
   // Global keyboard shortcuts
   useEffect(() => {
     function onKey(e) {
-      if (e.key === '?' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'TEXTAREA') {
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'TEXTAREA' && document.activeElement.tagName !== 'INPUT') {
         setShortcutsOpen(v => !v);
       }
-      if ((e.ctrlKey || e.metaKey)) {
+      if (e.key === 'Escape') { setShortcutsOpen(false); setNotesOpen(false); setStatusOpen(false); }
+      if (e.ctrlKey || e.metaKey) {
         if (e.key === '/') { e.preventDefault(); setSidebarOpen(v => !v); }
         if (e.key === 'k') { e.preventDefault(); setMessages([]); }
         if (e.key === 'n') { e.preventDefault(); handleNewSession(); }
         if (e.key === 'e') { e.preventDefault(); exportChat(); }
+        if (e.key === 'b') { e.preventDefault(); handleBrief(); }
         if (e.key === 'N') { e.preventDefault(); setNotesOpen(v => !v); }
+        if (e.key === 'S') { e.preventDefault(); setStatusOpen(v => !v); }
       }
-      if (e.key === 'Escape') { setShortcutsOpen(false); setNotesOpen(false); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -434,15 +711,99 @@ export default function App() {
     } catch { /* ignore */ }
   }
 
+  async function handleRenameSession(oldId, newId) {
+    try {
+      await fetch(`${API_BASE}/api/memory/sessions/${oldId}/rename`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_id: newId }),
+      });
+      if (activeSession === oldId) setActiveSession(newId);
+      fetchSessions();
+    } catch { /* ignore */ }
+  }
+
   function handleSuggestion(text) {
     setInput(text);
     textareaRef.current?.focus();
   }
 
+  // ── File attachment ─────────────────────────────────────────────────────────
+  function handleAttachClick() {
+    fileInputRef.current?.click();
+  }
+
+  function handleFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = '.' + file.name.split('.').pop().toLowerCase();
+    if (!ALLOWED_EXTS.includes(ext)) {
+      alert(`Unsupported file type. Allowed: ${ALLOWED_EXTS.join(', ')}`);
+      return;
+    }
+    if (file.size > MAX_ATTACH_BYTES) {
+      alert(`File too large (max ${MAX_ATTACH_BYTES / 1024} KB).`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      setAttachment({ name: file.name, content: ev.target.result });
+    };
+    reader.readAsText(file);
+    // Reset so same file can be re-attached
+    e.target.value = '';
+  }
+
+  function clearAttachment() {
+    setAttachment(null);
+  }
+
+  // ── Daily brief ─────────────────────────────────────────────────────────────
+  async function handleBrief() {
+    if (loading || briefing) return;
+    setBriefing(true);
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: '☀️ Morning brief', time: new Date() },
+      { role: 'agent', content: '', streaming: true, time: new Date() },
+    ]);
+    try {
+      const res = await fetch(`${API_BASE}/api/system/brief?session_id=${encodeURIComponent(activeSession)}`);
+      setBackendOnline(true);
+      await drainSSE(res, chunk => {
+        setMessages(prev => {
+          const arr = [...prev];
+          const last = arr[arr.length - 1];
+          arr[arr.length - 1] = { ...last, content: last.content + chunk, streaming: true };
+          return arr;
+        });
+      });
+    } catch (err) {
+      setBackendOnline(false);
+      setMessages(prev => {
+        const arr = [...prev];
+        arr[arr.length - 1] = {
+          role: 'agent',
+          content: `❌ Brief failed: ${err.message}`,
+          streaming: false,
+          time: new Date(),
+        };
+        return arr;
+      });
+    } finally {
+      setBriefing(false);
+      setMessages(prev => {
+        const arr = [...prev];
+        if (arr.length > 0) arr[arr.length - 1] = { ...arr[arr.length - 1], streaming: false };
+        return arr;
+      });
+    }
+ }
+
   function exportChat() {
     if (messages.length === 0) return;
     const md = messages
-      .filter(m => !isToolEvent(m.content))
+      .filter(m => !isToolEvent(m.content) && !isToolDoneEvent(m.content))
       .map(m => `**${m.role === 'user' ? 'You' : 'R.A.Z.A.'}**\n${m.content}`)
       .join('\n\n---\n\n');
     const blob = new Blob([md], { type: 'text/markdown' });
@@ -456,68 +817,48 @@ export default function App() {
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
-    if (!trimmed || loading) return;
+    if ((!trimmed && !attachment) || loading) return;
+
+    // Build the actual message — prepend file content if attached
+    let fullMessage = trimmed;
+    if (attachment) {
+      fullMessage = `[Attached file: **${attachment.name}**]\n\`\`\`\n${attachment.content}\n\`\`\`\n\n${trimmed || 'Summarize or explain the attached file.'}`;
+      setAttachment(null);
+    }
 
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: trimmed, time: new Date() }]);
+    setMessages(prev => [...prev, { role: 'user', content: attachment ? `📎 ${attachment?.name || ''} — ${trimmed || 'Explain attached file'}` : trimmed, time: new Date() }]);
     setLoading(true);
-
-    // Placeholder streaming agent bubble
     setMessages(prev => [...prev, { role: 'agent', content: '', streaming: true, time: new Date() }]);
 
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmed, session_id: activeSession }),
+        body: JSON.stringify({ message: fullMessage, session_id: activeSession }),
       });
-
       setBackendOnline(true);
 
-      if (!res.body) throw new Error('No readable stream');
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let done = false;
-      let buffer = '';
-
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split('\n\n');
-          buffer = parts.pop() ?? '';
-
-          for (const part of parts) {
-            if (!part.startsWith('data: ')) continue;
-            const data = part.substring(6);
-            if (data === '[DONE]') { done = true; break; }
-
-            const decoded = decodeSSE(data);
-
-            if (isToolEvent(decoded)) {
-              // Finalize current streaming bubble, insert tool card, open new bubble
-              setMessages(prev => {
-                const arr = [...prev];
-                arr[arr.length - 1] = { ...arr[arr.length - 1], streaming: false };
-                return [
-                  ...arr,
-                  { role: 'agent', content: decoded, time: new Date() },
-                  { role: 'agent', content: '', streaming: true, time: new Date() },
-                ];
-              });
-            } else {
-              setMessages(prev => {
-                const arr = [...prev];
-                const last = arr[arr.length - 1];
-                arr[arr.length - 1] = { ...last, content: last.content + decoded, streaming: true };
-                return arr;
-              });
-            }
-          }
+      await drainSSE(res, chunk => {
+        if (isToolEvent(chunk)) {
+          setMessages(prev => {
+            const arr = [...prev];
+            arr[arr.length - 1] = { ...arr[arr.length - 1], streaming: false };
+            return [
+              ...arr,
+              { role: 'agent', content: chunk, time: new Date() },
+              { role: 'agent', content: '', streaming: true, time: new Date() },
+            ];
+          });
+        } else {
+          setMessages(prev => {
+            const arr = [...prev];
+            const last = arr[arr.length - 1];
+            arr[arr.length - 1] = { ...last, content: last.content + chunk, streaming: true };
+            return arr;
+          });
         }
-      }
+      });
     } catch (err) {
       setBackendOnline(false);
       setMessages(prev => {
@@ -540,7 +881,7 @@ export default function App() {
       fetchSessions();
       fetchProviders();
     }
-  }, [input, loading, activeSession]);
+  }, [input, loading, activeSession, attachment]);
 
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -559,12 +900,14 @@ export default function App() {
   }
 
   const showEmpty = messages.length === 0;
+  const isBusy = loading || briefing;
 
   return (
     <div className="app-shell">
       {!backendOnline && <OfflineBanner />}
       {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
       <NotesPanel visible={notesOpen} onClose={() => setNotesOpen(false)} />
+      <StatusPanel visible={statusOpen} onClose={() => setStatusOpen(false)} />
 
       <Sidebar
         visible={sidebarOpen}
@@ -573,6 +916,7 @@ export default function App() {
         onSelectSession={setActiveSession}
         onNewSession={handleNewSession}
         onDeleteSession={handleDeleteSession}
+        onRenameSession={handleRenameSession}
       />
 
       <div className="main-area">
@@ -589,12 +933,25 @@ export default function App() {
             <p>Rapid Autonomous Zettelkasten Agent</p>
             {providerInfo?.default_provider && (
               <div className="provider-chip">
-                AI: {providerInfo.default_provider} · model: {providerInfo.model_name}
+                {providerInfo.default_provider} · {providerInfo.model_name}
               </div>
             )}
           </div>
 
           <div className="header-actions">
+            <button
+              id="brief-btn"
+              className={`header-icon-btn ${briefing ? 'active-btn' : ''}`}
+              onClick={handleBrief}
+              disabled={isBusy}
+              title="Morning brief (Ctrl+B)"
+            >☀️</button>
+            <button
+              id="status-toggle-btn"
+              className="header-icon-btn"
+              onClick={() => setStatusOpen(v => !v)}
+              title="System status (Ctrl+Shift+S)"
+            >⚡</button>
             <button
               id="notes-toggle-btn"
               className="header-icon-btn"
@@ -628,7 +985,7 @@ export default function App() {
                 <option value={activeSession}>{activeSession}</option>
               )}
             </select>
-            <div className={`status-dot ${loading ? 'thinking' : ''}`} title={loading ? 'Thinking…' : 'Online'} />
+            <div className={`status-dot ${isBusy ? 'thinking' : ''}`} title={isBusy ? 'Thinking…' : 'Online'} />
           </div>
         </header>
 
@@ -637,7 +994,7 @@ export default function App() {
             <div className="empty-state">
               <div className="empty-state-avatar">R</div>
               <h2>R.A.Z.A. is online.</h2>
-              <p>Your autonomous AI agent with web search, Python REPL, and persistent Zettelkasten memory.</p>
+              <p>Your autonomous AI agent with web search, Python REPL, Gmail/Calendar, and persistent Zettelkasten memory.</p>
               <div className="empty-suggestions">
                 {SUGGESTIONS.map((s, i) => (
                   <button key={i} className="suggestion-chip" onClick={() => handleSuggestion(s.text)}>
@@ -645,7 +1002,7 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <div className="empty-shortcut-hint">Press <kbd>?</kbd> for keyboard shortcuts</div>
+              <div className="empty-shortcut-hint">Press <kbd>?</kbd> for shortcuts · <kbd>Ctrl+Shift+S</kbd> for system status</div>
             </div>
           ) : (
             messages.map((msg, i) => <Message key={i} msg={msg} />)
@@ -654,7 +1011,34 @@ export default function App() {
         </main>
 
         <div className="input-area">
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ALLOWED_EXTS.join(',')}
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
+          {/* Attachment badge */}
+          {attachment && (
+            <div className="attachment-bar">
+              <span className="attachment-badge">
+                📎 <strong>{attachment.name}</strong>
+                <span className="attachment-size">
+                  {(attachment.content.length / 1024).toFixed(1)} KB
+                </span>
+              </span>
+              <button className="attachment-clear" onClick={clearAttachment} title="Remove attachment">✕</button>
+            </div>
+          )}
           <div className="input-wrapper">
+            <button
+              id="attach-btn"
+              className="attach-btn"
+              onClick={handleAttachClick}
+              disabled={isBusy}
+              title="Attach file (txt, md, py, json, csv…)"
+            >📎</button>
             <textarea
               id="chat-input"
               ref={textareaRef}
@@ -663,21 +1047,21 @@ export default function App() {
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder="Command R.A.Z.A.… (Shift+Enter for newline)"
-              disabled={loading}
+              placeholder={attachment ? `Ask about ${attachment.name}…` : 'Command R.A.Z.A.… (Shift+Enter for newline)'}
+              disabled={isBusy}
             />
             <button
               id="send-btn"
               className="send-btn"
               onClick={handleSend}
-              disabled={loading || !input.trim()}
+              disabled={isBusy || (!input.trim() && !attachment)}
               title="Send (Enter)"
             >
-              {loading ? <span className="send-spinner" /> : '↗'}
+              {isBusy ? <span className="send-spinner" /> : '↗'}
             </button>
           </div>
           <div className="input-hint">
-            Enter · send &nbsp;·&nbsp; Shift+Enter · newline &nbsp;·&nbsp; Ctrl+K · clear &nbsp;·&nbsp; ? · shortcuts
+            Enter · send &nbsp;·&nbsp; Shift+Enter · newline &nbsp;·&nbsp; 📎 · attach file &nbsp;·&nbsp; ☀️ · brief &nbsp;·&nbsp; ? · shortcuts
           </div>
         </div>
       </div>

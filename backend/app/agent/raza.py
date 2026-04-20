@@ -119,11 +119,15 @@ class RazaEngine:
             except Exception as exc:
                 last_error = str(exc)
                 if not _should_try_next_provider(last_error):
-                    raise
+                    friendly = _format_provider_error(last_error, provider)
+                    yield friendly
+                    append_message(session_id, "assistant", friendly)
+                    return
                 continue
         else:
-            final_reply = f"All providers unavailable. Last error: {last_error}"
-            yield final_reply
+            friendly = _format_provider_error(last_error, "all providers")
+            yield friendly
+            return
 
         # Persist final assistant reply
         if final_reply:
@@ -351,6 +355,105 @@ def _format_args_preview(tool_name: str, args: dict) -> str:
     elif tool_name == "save_note":
         return f'title="{args.get("title", "")}"'
     return str(args)[:80]
+
+
+def _format_provider_error(error_text: str, provider: str = "provider") -> str:
+    """Convert raw provider exception text into a short, user-friendly message."""
+    lowered = (error_text or "").lower()
+    # Extract retry delay if present (Gemini includes 'retry in Xs')
+    retry_hint = ""
+    import re
+    m = re.search(r"retry in (\d+(?:\.\d+)?)s", error_text, re.IGNORECASE)
+    if m:
+        retry_hint = f" Retry in **{int(float(m.group(1)))}s**."
+    if "resource_exhausted" in lowered or "quota" in lowered:
+        return (
+            f"⚠️ **{provider.title()} quota exhausted.**{retry_hint}\n"
+            "Add `ANTHROPIC_API_KEY` to `backend/.env` for automatic fallback, "
+            "or wait for the quota to reset."
+        )
+    if "api key" in lowered or "authentication" in lowered or "unauthenticated" in lowered:
+        return (
+            f"⚠️ **{provider.title()} authentication failed.** "
+            "Check your API key in `backend/.env`."
+        )
+    if "timeout" in lowered or "timed out" in lowered:
+        return f"⚠️ **{provider.title()} timed out.** The request took too long — try again."
+    if "service unavailable" in lowered or "temporarily" in lowered:
+        return f"⚠️ **{provider.title()} is temporarily unavailable.** Try again shortly."
+    # Fallback: trim to first 200 chars
+    short = error_text[:200].replace("\n", " ")
+    return f"⚠️ **Provider error** ({provider}): {short}…"
+
+
+async def generate_brief(session_id: str):
+    """
+    Generate a daily briefing by calling the AI with a synthesis prompt.
+    Yields SSE-safe chunks (same protocol as process_message).
+    """
+    from app.memory.store import list_notes, get_session_summary
+    loop = asyncio.get_event_loop()
+
+    notes = list_notes()[:10]
+    notes_text = "\n".join(
+        f"- **{n['title']}**: {n['content'][:120].replace(chr(10), ' ')}…"
+        for n in notes
+    ) if notes else "No notes saved yet."
+
+    brief_prompt = (
+        f"Today is {datetime.now().strftime('%A, %B %d, %Y')}. "
+        "Generate a concise morning briefing for Raza. Cover:\n"
+        "1. A one-line greeting and date overview\n"
+        "2. Key topics from recent notes (summarize, don't list verbatim)\n"
+        "3. Any actionable reminders or patterns noticed\n"
+        "4. A motivating one-liner to close\n\n"
+        f"Recent notes:\n{notes_text}\n\n"
+        "Keep the total brief to 200–350 words. Be direct, not flowery."
+    )
+
+    provider_order = _provider_order()
+    if not provider_order:
+        yield "⚠️ No AI provider configured. Add GOOGLE_API_KEY to backend/.env."
+        return
+
+    for provider in provider_order:
+        try:
+            if provider == "gemini":
+                client = raza_engine.clients["gemini"]
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: client.models.generate_content(
+                        model=_resolve_model_name("gemini"),
+                        contents=[types.Content(role="user", parts=[types.Part(text=brief_prompt)])],
+                        config=types.GenerateContentConfig(temperature=0.7),
+                    ),
+                )
+                text = response.candidates[0].content.parts[0].text or "Brief unavailable."
+            else:
+                client = raza_engine.clients["anthropic"]
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: client.messages.create(
+                        model=_resolve_model_name("anthropic"),
+                        max_tokens=600,
+                        temperature=0.7,
+                        messages=[{"role": "user", "content": brief_prompt}],
+                    ),
+                )
+                text = response.content[0].text or "Brief unavailable."
+            # Stream in ~80-char chunks to look natural
+            chunk_size = 80
+            for i in range(0, len(text), chunk_size):
+                yield text[i: i + chunk_size]
+            return
+        except Exception as exc:
+            err = str(exc)
+            if not _should_try_next_provider(err):
+                yield _format_provider_error(err, provider)
+                return
+            continue
+
+    yield _format_provider_error("All providers unavailable.", "all providers")
 
 
 raza_engine = RazaEngine()

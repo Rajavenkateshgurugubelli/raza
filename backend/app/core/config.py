@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     google_oauth_access_token: str = ""
     app_name: str = "R.A.Z.A. Agent"
     memory_db_path: str = "raza_memory.db"
+    chroma_db_path: str = "chroma_db"
     max_memory_messages: int = 50
     recent_context_messages: int = 20
 
@@ -22,3 +23,4 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
+

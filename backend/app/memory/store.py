@@ -7,6 +7,7 @@ from datetime import datetime
 from sqlalchemy import create_engine, Column, String, Text, DateTime, Integer, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from app.core.config import get_settings
+from app.memory import vector_store as vs
 
 settings = get_settings()
 DATABASE_URL = f"sqlite:///{settings.memory_db_path}"
@@ -114,6 +115,27 @@ def list_sessions() -> list[dict]:
         db.close()
 
 
+def rename_session(old_id: str, new_id: str) -> bool:
+    """Rename a session by updating session_id on all messages and summary."""
+    db = SessionLocal()
+    try:
+        updated = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == old_id)
+            .update({"session_id": new_id})
+        )
+        if updated == 0:
+            return False
+        # Also rename summary if exists
+        summary_row = db.query(SessionSummary).filter(SessionSummary.session_id == old_id).first()
+        if summary_row:
+            summary_row.session_id = new_id
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
 # ── NOTES CRUD ────────────────────────────────────────────────────────────────
 
 def save_note_to_db(title: str, content: str, tags: list[str] = None) -> dict:
@@ -128,7 +150,10 @@ def save_note_to_db(title: str, content: str, tags: list[str] = None) -> dict:
         db.add(note)
         db.commit()
         db.refresh(note)
-        return _note_to_dict(note)
+        result = _note_to_dict(note)
+        # Sync to vector index (fire-and-forget)
+        vs.upsert_note(result["id"], title, content, tags or [], settings.chroma_db_path)
+        return result
     finally:
         db.close()
 
@@ -172,6 +197,8 @@ def delete_note(note_id: int) -> bool:
             return False
         db.delete(row)
         db.commit()
+        # Remove from vector index
+        vs.delete_note(note_id, settings.chroma_db_path)
         return True
     finally:
         db.close()
@@ -182,6 +209,49 @@ def get_note_by_id(note_id: int) -> dict | None:
     try:
         row = db.query(Note).filter(Note.id == note_id).first()
         return _note_to_dict(row) if row else None
+    finally:
+        db.close()
+
+
+def update_note_in_db(note_id: int, title: str = None, content: str = None, tags: list[str] = None) -> dict | None:
+    """Partially update a note's fields. Returns updated note dict or None."""
+    db = SessionLocal()
+    try:
+        row = db.query(Note).filter(Note.id == note_id).first()
+        if not row:
+            return None
+        if title is not None:
+            row.title = title
+        if content is not None:
+            row.content = content
+        if tags is not None:
+            row.tags = json.dumps(tags)
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(row)
+        result = _note_to_dict(row)
+        # Re-sync updated note in vector index
+        vs.upsert_note(
+            result["id"], result["title"], result["content"],
+            result["tags"], settings.chroma_db_path
+        )
+        return result
+    finally:
+        db.close()
+
+
+def get_memory_stats() -> dict:
+    """Return aggregate statistics about stored data."""
+    db = SessionLocal()
+    try:
+        note_count = db.query(Note).count()
+        session_count = db.execute(text("SELECT COUNT(DISTINCT session_id) FROM chat_messages")).scalar() or 0
+        message_count = db.query(ChatMessage).count()
+        return {
+            "notes": note_count,
+            "sessions": session_count,
+            "messages": message_count,
+        }
     finally:
         db.close()
 

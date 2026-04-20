@@ -1,7 +1,14 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from ..memory.store import save_note_to_db, search_notes_in_db, list_notes, delete_note, get_note_by_id
+from ..memory.store import (
+    save_note_to_db,
+    search_notes_in_db,
+    list_notes,
+    delete_note,
+    get_note_by_id,
+    update_note_in_db,
+)
 
 router = APIRouter()
 
@@ -10,6 +17,12 @@ class NoteCreate(BaseModel):
     title: str
     content: str
     tags: Optional[list[str]] = []
+
+
+class NoteUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    tags: Optional[list[str]] = None
 
 
 @router.get("")
@@ -32,6 +45,20 @@ def get_note(note_id: int):
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
     return note
+
+
+@router.patch("/{note_id}")
+def update_note(note_id: int, body: NoteUpdate):
+    """Partially update a note (title, content, or tags)."""
+    updated = update_note_in_db(
+        note_id,
+        title=body.title,
+        content=body.content,
+        tags=body.tags,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return updated
 
 
 @router.delete("/{note_id}")

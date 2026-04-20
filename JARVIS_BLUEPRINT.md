@@ -16,26 +16,29 @@
 - [x] Tool-calling loop with web/file/code/memory tools.
 - [x] Persistent notes and chat history in SQLite.
 - [x] Session memory compression (rolling summary + recent turns).
-- [ ] Provider abstraction (Claude + fallback providers).
-- [ ] Vector memory store (Chroma/Qdrant semantic retrieval).
-- [ ] MCP connectors (Gmail, Calendar, Notion/Obsidian).
-- [ ] Voice I/O pipeline.
-- [ ] Proactive jobs (morning brief, alerts, reports).
-- [ ] Dashboard/HUD polish and mobile packaging.
+- [x] Provider abstraction (Gemini primary + Claude fallback).
+- [x] Gmail and Calendar tool integrations (OAuth token-based).
+- [x] Full Notes CRUD API with PATCH editing.
+- [x] Session rename API and UI (double-click in sidebar).
+- [x] System status panel (/api/system/status).
+- [x] Note create/edit directly from Notes panel UI.
+- [x] 9-tool registry: web_search, fetch_url, run_python, save_note, search_notes, gmail_list_recent, gmail_create_draft, calendar_upcoming, calendar_create_event.
+- [x] Vector memory store (ChromaDB + all-MiniLM-L6-v2, hybrid semantic+keyword search).
+- [x] Daily brief endpoint (GET /api/system/brief, SSE streaming).
+- [x] File attachment upload in chat UI (📎 button, 50KB limit, 10+ file types).
+- [x] Clean error messages for quota/auth/timeout failures.
+- [ ] Voice I/O pipeline (Whisper + Silero VAD + TTS).
+- [ ] Proactive jobs (morning brief automation, alerts, reports).
+- [ ] Desktop wrapper (Electron/Tauri).
 - [ ] Docker and cloud deployment workflow.
 
 ## Immediate Next Build Targets
 
-### Phase A (now)
-- Stabilize Claude runtime path and env validation.
-- Add memory APIs for summary inspect/edit.
-- Add tool-call retry/fallback chain.
+### Phase E (next)
+- Add voice pipeline: Whisper STT (local via `faster-whisper`) + TTS (via `edge-tts`).
+- Add proactive scheduler: auto-run daily brief at startup if configured time passes.
+- Add tool result caching: avoid re-fetching same URLs in same session.
 
-### Phase B
-- Add vector memory backend (Chroma first).
-- Add Gmail and Google Calendar integration layer.
-- Add daily brief scheduled job.
-
-### Phase C
-- Add voice pipeline with Whisper + Silero VAD + TTS.
-- Add proactive notifications and system tray flow.
+### Phase F
+- Docker containerization with auto-restart and volume mounts.
+- Cloud deployment option (Railway, Fly.io, etc.).
