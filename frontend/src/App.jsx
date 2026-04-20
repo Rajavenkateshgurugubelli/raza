@@ -117,6 +117,35 @@ function CopyBtn({ text }) {
 }
 CopyBtn.propTypes = { text: PropTypes.string.isRequired };
 
+// ── Speak Button (edge-tts via backend) ─────────────────────────────────────
+function SpeakBtn({ text }) {
+  const [playing, setPlaying] = useState(false);
+  const audioRef = useRef(null);
+  async function handleSpeak() {
+    if (playing) { audioRef.current?.pause(); setPlaying(false); return; }
+    const plain = text
+      .replace(/```[\s\S]*?```/g, 'code block')
+      .replace(/`[^`]+`/g, '').replace(/[#*_~>]/g, '')
+      .replace(/!\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\s+/g, ' ').trim();
+    try {
+      const audio = new Audio(`${API_BASE}/api/voice/speak?text=${encodeURIComponent(plain.slice(0, 3000))}`);
+      audioRef.current = audio;
+      setPlaying(true);
+      audio.onended = () => setPlaying(false);
+      audio.onerror = () => setPlaying(false);
+      await audio.play();
+    } catch { setPlaying(false); }
+  }
+  return (
+    <button className={`speak-btn ${playing ? 'playing' : ''}`} onClick={handleSpeak}
+      title={playing ? 'Stop' : 'Read aloud'}>
+      {playing ? '⏹' : '🗣️'}
+    </button>
+  );
+}
+SpeakBtn.propTypes = { text: PropTypes.string.isRequired };
+
+
 // ── Message Component ─────────────────────────────────────────────────────────
 function Message({ msg }) {
   const isUser = msg.role === 'user';
@@ -138,6 +167,7 @@ function Message({ msg }) {
         </div>
         <div className="msg-meta">
           {msg.time && <span className="msg-time">{formatTime(msg.time)}</span>}
+          {!isUser && !msg.streaming && msg.content && <SpeakBtn text={msg.content} />}
           {!isUser && !msg.streaming && msg.content && <CopyBtn text={msg.content} />}
         </div>
       </div>
@@ -562,6 +592,129 @@ function OfflineBanner() {
   );
 }
 
+// ── Settings Panel ────────────────────────────────────────────────────────────
+function SettingsPanel({ visible, onClose }) {
+  const [config, setConfig] = useState(null);
+  const [fields, setFields] = useState({});
+  const [dirty, setDirty] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null); // { type: 'success'|'error', msg }
+
+  useEffect(() => {
+    if (!visible) return;
+    Promise.all([
+      fetch(`${API_BASE}/api/settings`).then(r => r.json()),
+      fetch(`${API_BASE}/api/settings/fields`).then(r => r.json()),
+    ]).then(([cfg, flds]) => {
+      setConfig(cfg);
+      setFields(flds);
+      setDirty({});
+    }).catch(() => setToast({ type: 'error', msg: 'Failed to load settings.' }));
+  }, [visible]);
+
+  function handleChange(key, value) {
+    setDirty(prev => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSave() {
+    if (Object.keys(dirty).length === 0) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dirty),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setToast({ type: 'success', msg: `Saved: ${data.updated.join(', ')}. Restart backend to apply.` });
+        setConfig(prev => ({ ...prev, ...dirty }));
+        setDirty({});
+      } else {
+        const err = await res.json();
+        setToast({ type: 'error', msg: err.detail || 'Save failed.' });
+      }
+    } catch (e) {
+      setToast({ type: 'error', msg: String(e) });
+    } finally {
+      setSaving(false);
+      setTimeout(() => setToast(null), 4000);
+    }
+  }
+
+  // Group fields for display
+  const GROUPS = {
+    '🤖 Model & Provider': ['model_name', 'provider_order', 'app_name'],
+    '🧠 Memory': ['max_memory_messages', 'recent_context_messages'],
+    '☀️ Daily Brief': ['brief_time', 'brief_session'],
+    '🗣️ Voice': ['tts_voice'],
+  };
+
+  if (!visible) return null;
+  return (
+    <aside className="settings-panel slide-in-right">
+      <div className="panel-header">
+        <span>⚙️ Settings</span>
+        <button onClick={onClose} className="panel-close-btn">✕</button>
+      </div>
+
+      {toast && (
+        <div className={`settings-toast ${toast.type}`}>{toast.msg}</div>
+      )}
+
+      <div className="settings-security-note">
+        🔒 API keys (<code>GOOGLE_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>) must be set directly in <code>backend/.env</code> for security.
+      </div>
+
+      {!config ? (
+        <div className="settings-loading">Loading config…</div>
+      ) : (
+        <div className="settings-form">
+          {Object.entries(GROUPS).map(([groupName, keys]) => (
+            <div key={groupName} className="settings-group">
+              <div className="settings-group-title">{groupName}</div>
+              {keys.map(key => {
+                if (!(key in config)) return null;
+                const current = dirty[key] !== undefined ? dirty[key] : config[key];
+                const desc = fields[key] || '';
+                return (
+                  <div key={key} className="settings-field">
+                    <label className="settings-label" htmlFor={`setting-${key}`}>
+                      <span className="settings-key">{key}</span>
+                      <span className="settings-desc">{desc}</span>
+                    </label>
+                    <input
+                      id={`setting-${key}`}
+                      className={`settings-input ${dirty[key] !== undefined ? 'modified' : ''}`}
+                      type="text"
+                      value={current}
+                      onChange={e => handleChange(key, e.target.value)}
+                      placeholder={desc}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          <button
+            className="settings-save-btn"
+            onClick={handleSave}
+            disabled={saving || Object.keys(dirty).length === 0}
+          >
+            {saving ? 'Saving…' : `Save ${Object.keys(dirty).length > 0 ? `(${Object.keys(dirty).length} changed)` : ''}`}
+          </button>
+        </div>
+      )}
+    </aside>
+  );
+}
+SettingsPanel.propTypes = {
+  visible: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+};
+
+
 // ── Shortcuts Modal ───────────────────────────────────────────────────────────
 function ShortcutsModal({ onClose }) {
   return (
@@ -579,6 +732,7 @@ function ShortcutsModal({ onClose }) {
           <div className="shortcut-row"><kbd>Ctrl+N</kbd><span>New session</span></div>
           <div className="shortcut-row"><kbd>Ctrl+E</kbd><span>Export chat</span></div>
           <div className="shortcut-row"><kbd>Ctrl+B</kbd><span>Morning brief ☀️</span></div>
+          <div className="shortcut-row"><kbd>Ctrl+M</kbd><span>Voice input 🎤</span></div>
           <div className="shortcut-row"><kbd>Ctrl+Shift+N</kbd><span>Open notes</span></div>
           <div className="shortcut-row"><kbd>Ctrl+Shift+S</kbd><span>System status</span></div>
           <div className="shortcut-row"><kbd>?</kbd><span>This panel</span></div>
@@ -589,6 +743,8 @@ function ShortcutsModal({ onClose }) {
   );
 }
 ShortcutsModal.propTypes = { onClose: PropTypes.func.isRequired };
+
+// The duplicate SpeakBtn that was added is no longer needed (now declared above).
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
@@ -602,11 +758,17 @@ export default function App() {
   const [backendOnline, setBackendOnline] = useState(true);
   const [notesOpen, setNotesOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [providerInfo, setProviderInfo] = useState(null);
   // Attachment state
   const [attachment, setAttachment] = useState(null); // { name, content }
   const fileInputRef = useRef(null);
+  // Voice state
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
   const chatEndRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -624,13 +786,15 @@ export default function App() {
       if (e.key === '?' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'TEXTAREA' && document.activeElement.tagName !== 'INPUT') {
         setShortcutsOpen(v => !v);
       }
-      if (e.key === 'Escape') { setShortcutsOpen(false); setNotesOpen(false); setStatusOpen(false); }
+      if (e.key === 'Escape') { setShortcutsOpen(false); setNotesOpen(false); setStatusOpen(false); setSettingsOpen(false); }
       if (e.ctrlKey || e.metaKey) {
         if (e.key === '/') { e.preventDefault(); setSidebarOpen(v => !v); }
         if (e.key === 'k') { e.preventDefault(); setMessages([]); }
         if (e.key === 'n') { e.preventDefault(); handleNewSession(); }
         if (e.key === 'e') { e.preventDefault(); exportChat(); }
         if (e.key === 'b') { e.preventDefault(); handleBrief(); }
+        if (e.key === 'm') { e.preventDefault(); handleMicToggle(); }
+        if (e.key === ',') { e.preventDefault(); setSettingsOpen(v => !v); }
         if (e.key === 'N') { e.preventDefault(); setNotesOpen(v => !v); }
         if (e.key === 'S') { e.preventDefault(); setStatusOpen(v => !v); }
       }
@@ -756,6 +920,48 @@ export default function App() {
 
   function clearAttachment() {
     setAttachment(null);
+  }
+
+  // ── Voice recording ────────────────────────────────────────────────────────
+  async function handleMicToggle() {
+    if (recording) {
+      // Stop recording
+      mediaRecorderRef.current?.stop();
+      setRecording(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mr;
+      mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        setTranscribing(true);
+        try {
+          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const fd = new FormData();
+          fd.append('file', blob, 'recording.webm');
+          const res = await fetch(`${API_BASE}/api/voice/transcribe`, { method: 'POST', body: fd });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.text) {
+              setInput(prev => (prev ? prev + ' ' : '') + data.text);
+              textareaRef.current?.focus();
+            }
+          }
+        } catch (err) {
+          console.error('Transcription error:', err);
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mr.start();
+      setRecording(true);
+    } catch (err) {
+      alert('Microphone access denied or unavailable. ' + err.message);
+    }
   }
 
   // ── Daily brief ─────────────────────────────────────────────────────────────
@@ -908,6 +1114,7 @@ export default function App() {
       {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
       <NotesPanel visible={notesOpen} onClose={() => setNotesOpen(false)} />
       <StatusPanel visible={statusOpen} onClose={() => setStatusOpen(false)} />
+      <SettingsPanel visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <Sidebar
         visible={sidebarOpen}
@@ -958,6 +1165,12 @@ export default function App() {
               onClick={() => setNotesOpen(v => !v)}
               title="Notes (Ctrl+Shift+N)"
             >📒</button>
+            <button
+              id="settings-btn"
+              className={`header-icon-btn ${settingsOpen ? 'active-btn' : ''}`}
+              onClick={() => setSettingsOpen(v => !v)}
+              title="Settings (Ctrl+,)"
+            >⚙️</button>
             <button
               id="export-btn"
               className="header-icon-btn"
@@ -1033,6 +1246,15 @@ export default function App() {
           )}
           <div className="input-wrapper">
             <button
+              id="mic-btn"
+              className={`mic-btn ${recording ? 'recording' : ''} ${transcribing ? 'transcribing' : ''}`}
+              onClick={handleMicToggle}
+              disabled={isBusy || transcribing}
+              title={recording ? 'Stop recording (Ctrl+M)' : 'Voice input (Ctrl+M)'}
+            >
+              {transcribing ? <span className="send-spinner" /> : recording ? '⏹' : '🎤'}
+            </button>
+            <button
               id="attach-btn"
               className="attach-btn"
               onClick={handleAttachClick}
@@ -1061,7 +1283,7 @@ export default function App() {
             </button>
           </div>
           <div className="input-hint">
-            Enter · send &nbsp;·&nbsp; Shift+Enter · newline &nbsp;·&nbsp; 📎 · attach file &nbsp;·&nbsp; ☀️ · brief &nbsp;·&nbsp; ? · shortcuts
+            Enter · send &nbsp;·&nbsp; Shift+Enter · newline &nbsp;·&nbsp; 🎤 · voice &nbsp;·&nbsp; 📎 · attach &nbsp;·&nbsp; ☀️ · brief &nbsp;·&nbsp; ? · shortcuts
           </div>
         </div>
       </div>

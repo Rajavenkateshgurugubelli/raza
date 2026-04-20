@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  # ── Backend ──────────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: raza-backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      - MEMORY_DB_PATH=/data/raza_memory.db
+      - CHROMA_DB_PATH=/data/chroma_db
+    volumes:
+      - raza_data:/data          # SQLite + ChromaDB persistent storage
+      - whisper_cache:/root/.cache/huggingface  # Whisper model cache
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 3
+    networks:
+      - raza-net
+
+  # ── Frontend ─────────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: raza-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - raza-net
+
+volumes:
+  raza_data:
+    driver: local
+  whisper_cache:
+    driver: local
+
+networks:
+  raza-net:
+    driver: bridge

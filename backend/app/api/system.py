@@ -3,6 +3,8 @@ from fastapi.responses import StreamingResponse
 from ..core.config import get_settings
 from ..memory.store import get_memory_stats
 from ..tools.registry import tools_list
+from ..tools.cache import stats as cache_stats, invalidate as cache_invalidate
+from ..scheduler import get_scheduler_info
 from ..agent.raza import current_provider_snapshot, generate_brief
 
 router = APIRouter()
@@ -38,19 +40,25 @@ def get_full_status():
     snapshot = current_provider_snapshot()
     stats = get_memory_stats()
     tool_names = [t["name"] for t in tools_list]
+    scheduler = get_scheduler_info()
+    cache = cache_stats()
 
     return {
         "agent": settings.app_name,
-        "version": "2.1.0",
+        "version": "2.2.0",
         "provider": snapshot,
         "memory": stats,
         "tools": tool_names,
+        "cache": cache,
+        "scheduler": scheduler,
         "config": {
             "model_name": settings.model_name,
             "max_memory_messages": settings.max_memory_messages,
             "recent_context_messages": settings.recent_context_messages,
             "google_workspace": bool(settings.google_oauth_access_token),
             "vector_memory": True,
+            "voice_enabled": True,
+            "tts_voice": settings.tts_voice,
         },
     }
 
@@ -77,3 +85,10 @@ async def daily_brief(session_id: str = "default"):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.delete("/cache")
+def clear_cache():
+    """Invalidate the entire tool result cache."""
+    count = cache_invalidate()
+    return {"cleared": count}

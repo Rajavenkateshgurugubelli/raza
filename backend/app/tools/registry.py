@@ -1,6 +1,7 @@
 from app.tools.web import web_search, fetch_url
 from app.tools.python_repl import run_python
 from app.tools.zettelkasten import save_note, search_notes
+from app.tools.cache import get as cache_get, put as cache_put
 from app.tools.google_workspace import (
     gmail_list_recent,
     gmail_create_draft,
@@ -158,35 +159,40 @@ def get_tool_schemas():
 
 def execute_tool(tool_name: str, tool_args: dict):
     try:
+        # Check cache for cacheable tools
+        cached = cache_get(tool_name, tool_args)
+        if cached is not None:
+            return cached
+
         if tool_name == "web_search":
             query = tool_args.get("query")
-            return web_search(query)
+            result = web_search(query)
         elif tool_name == "fetch_url":
             url = tool_args.get("url")
-            return fetch_url(url)
+            result = fetch_url(url)
         elif tool_name == "run_python":
-            return run_python(tool_args.get("code"))
+            result = run_python(tool_args.get("code"))
         elif tool_name == "save_note":
-            return save_note(tool_args.get("title"), tool_args.get("content"), tool_args.get("tags"))
+            result = save_note(tool_args.get("title"), tool_args.get("content"), tool_args.get("tags"))
         elif tool_name == "search_notes":
-            return search_notes(tool_args.get("query"))
+            result = search_notes(tool_args.get("query"))
         elif tool_name == "gmail_list_recent":
             limit = int(tool_args.get("limit", 5) or 5)
-            return gmail_list_recent(limit=limit, query=tool_args.get("query", ""))
+            result = gmail_list_recent(limit=limit, query=tool_args.get("query", ""))
         elif tool_name == "gmail_create_draft":
-            return gmail_create_draft(
+            result = gmail_create_draft(
                 to=tool_args.get("to", ""),
                 subject=tool_args.get("subject", ""),
                 body=tool_args.get("body", ""),
             )
         elif tool_name == "calendar_upcoming":
             limit = int(tool_args.get("limit", 5) or 5)
-            return calendar_upcoming(
+            result = calendar_upcoming(
                 limit=limit,
                 calendar_id=tool_args.get("calendar_id", "primary"),
             )
         elif tool_name == "calendar_create_event":
-            return calendar_create_event(
+            result = calendar_create_event(
                 summary=tool_args.get("summary", ""),
                 start_iso=tool_args.get("start_iso", ""),
                 end_iso=tool_args.get("end_iso", ""),
@@ -196,6 +202,11 @@ def execute_tool(tool_name: str, tool_args: dict):
             )
         else:
             return f"Tool {tool_name} not found."
+
+        # Store cacheable result
+        cache_put(tool_name, tool_args, result)
+        return result
+
     except Exception as exc:
         # Basic fallback chain for web research actions.
         if tool_name == "fetch_url":

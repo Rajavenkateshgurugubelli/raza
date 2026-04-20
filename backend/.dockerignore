@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.pyo
+.env
+.venv
+venv/
+*.egg-info/
+.pytest_cache/
+raza_memory.db
+chroma_db/
+whisper_models/
+*.log
+.git
+.gitignore

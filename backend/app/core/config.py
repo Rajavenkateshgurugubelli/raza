@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     chroma_db_path: str = "chroma_db"
     max_memory_messages: int = 50
     recent_context_messages: int = 20
+    # Proactive scheduler
+    brief_time: str = ""        # HH:MM — leave blank to disable
+    brief_session: str = "default"
+    # Voice I/O
+    tts_voice: str = "en-US-GuyNeural"  # any edge-tts neural voice
 
     class Config:
         env_file = ".env"
