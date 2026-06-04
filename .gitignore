@@ -1,0 +1,45 @@
+# Node / Frontend
+node_modules/
+dist/
+.angular/
+.next/
+out/
+.env
+
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.pyc
+*.pyo
+*.pyd
+chroma_db/
+
+# Java / Spring Boot
+target/
+.gradle/
+build/
+bin/
+
+# IDEs
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large ML data / model artifacts
+monitoring/reference_data.pkl
+model/model.pkl
+model/scaler.pkl
+threshold.txt
+data/creditcard.csv
